@@ -4,6 +4,7 @@
 *.so
 *.dylib
 .env
+spotify2slack
 
 # Test binary, build with `go test -c`
 *.test

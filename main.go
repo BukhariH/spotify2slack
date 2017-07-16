@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/middleware"
 	"github.com/joho/godotenv"
 	"github.com/nlopes/slack"
+	"github.com/robfig/cron"
 	"github.com/zmb3/spotify"
 )
 
@@ -57,7 +58,7 @@ func main() {
 	// Routes
 	r.Get("/", index)
 	r.Get("/callback", completeSpotifyAuth)
-	r.Get("/currentlyPlaying", setCurrentlyPlaying)
+	r.Get("/currentlyPlaying", currentlyPlaying)
 
 	fmt.Print("🚀 We're live & listening!\n")
 
@@ -70,25 +71,10 @@ func index(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, url, http.StatusFound)
 }
 
-func setCurrentlyPlaying(rw http.ResponseWriter, req *http.Request) {
+func currentlyPlaying(rw http.ResponseWriter, req *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
-
-	playerState, err := spotifyClient.PlayerState()
-	if err != nil {
-		log.Fatal(err)
-		http.Redirect(rw, req, "/", http.StatusFound)
-	}
-
-	var m = make(map[string]string)
-	if playerState.CurrentlyPlaying.Playing {
-		m["currentlyListeningTo"] = playerState.CurrentlyPlaying.Item.Name + " - " + playerState.CurrentlyPlaying.Item.Artists[0].Name
-		slackApi.SetUserCustomStatus(m["currentlyListeningTo"], slackSymbol)
-	} else {
-		m["currentlyListeningTo"] = "Not listening to anything right now"
-		slackApi.UnsetUserCustomStatus()
-	}
+	m := setCurrentlyPlaying()
 	json.NewEncoder(rw).Encode(m)
-
 }
 
 func completeSpotifyAuth(wr http.ResponseWriter, req *http.Request) {
@@ -103,7 +89,29 @@ func completeSpotifyAuth(wr http.ResponseWriter, req *http.Request) {
 	}
 	// use the token to get an authenticated client
 	spotifyClient = spotifyAuth.NewClient(tok)
+	c := cron.New()
+	c.AddFunc("@every 1m", func() {
+		setCurrentlyPlaying()
+	})
+	c.Start()
 	http.Redirect(wr, req, "/currentlyPlaying", http.StatusFound)
+}
+
+func setCurrentlyPlaying() map[string]string {
+	playerState, err := spotifyClient.PlayerState()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var m = make(map[string]string)
+	if playerState.CurrentlyPlaying.Playing {
+		m["currentlyListeningTo"] = playerState.CurrentlyPlaying.Item.Name + " - " + playerState.CurrentlyPlaying.Item.Artists[0].Name
+		slackApi.SetUserCustomStatus(m["currentlyListeningTo"], slackSymbol)
+	} else {
+		m["currentlyListeningTo"] = "Not listening to anything right now"
+		slackApi.UnsetUserCustomStatus()
+	}
+	return m
 }
 
 // https://play.golang.org/p/4FkNSiUDMg
